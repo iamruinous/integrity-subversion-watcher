@@ -1,0 +1,39 @@
+#!/usr/bin/env ruby
+require "rubygems"
+require "thor"
+
+class WithIntegritySubversionWatcher < Thor
+  include FileUtils
+  map "-C" => :config
+  map "--config" => :config
+
+  desc "check [projects]",
+       "Checks the latest revision of the listed projects."
+  method_options(:config => :required)
+  def check(projects)
+    touchfile = '/tmp/integrity-subversion-watcher'
+    raise 'Watcher is already running' if File.exist?(touchfile)
+    FileUtils.touch(touchfile)
+    begin
+      require 'integrity'
+      Integrity.new(File.expand_path(options[:config]))
+      Integrity::Project.all(:name => projects.split(/,/)).each do |project|
+        last_build = project.last_build
+        project_builder = Integrity::ProjectBuilder.new(project)
+        commit_metadata = project_builder.instance_variable_get(:@scm).commit_metadata('HEAD')
+        current_revision = commit_metadata[:revision].strip
+        last_build_revision = last_build.commit_identifier.strip
+        next if current_revision == last_build_revision
+        project.build(current_revision)
+      end
+    ensure
+      File.delete(touchfile)
+    end
+  end
+  
+  def config(path)
+    @config = File.expand_path(path)
+  end
+end
+
+WithIntegritySubversionWatcher.start
